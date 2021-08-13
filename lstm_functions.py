@@ -40,16 +40,6 @@ def rl(x):
 def hd(df,n=5,m=5):
     print(df.iloc[:n,:m])
 
-
-def shave_df(df,remove=[],reset=True):
-    df2=df.copy()
-    cols=df.columns
-    for c in cols:
-        for r in remove:
-            l=len(r)
-            if c[:l]==r:df2=df2.drop([c],axis=1)
-    return df2
-    
 def auc_score(y,pred):
     mt,mf,mh=roc_curve(y,pred.T[1])
     return AUC(mt,mf)
@@ -84,7 +74,7 @@ def period_plus(r_starts,periodNumber=1,end=True):
         return r_starts
     else:
         return r_starts.apply(lambda x: [x[0],str(int(x[1])-1),x[2]])
-
+    
 def norm_df(df,scale=None,full=False,pct=5):
   #Scale DataFrame based on ss: Standard Scaler or mm: MinMax Scaler
   ## Full ==True :: scale all numeric columns and duplicate non-numeric
@@ -165,22 +155,11 @@ def get_bags(df,number):
             list_bags.append(temp4)
     return(list_bags)
     
-def thr_round_old(pred, thresh, index=1,b0=0,b1=1):
-    ## input np array Nx2
-    y_pred=[]
-    for i in pred:
-        p0=i[index]
-        if p0<thresh: p0=b0
-        else: p0=b1
-        y_pred.append(p0)
-    return y_pred
-
 def thr_round(pred, thresh, index=1,b0=0,b1=1):
     ## input np array Nx2
     y_pred=[]
     for i in pred:
-        if len(i.shape)>0: p0=i[index]
-        else: p0=i
+        p0=i[index]
         if p0<thresh: p0=b0
         else: p0=b1
         y_pred.append(p0)
@@ -323,8 +302,8 @@ def Percentile(train,data=None,pct=5):
     df_norm=(data-m)/(M-m)
     return df_norm.values
 
-def compute_measure(true_label,predicted_probability,threshold=.5,index=1):
-    predicted_label=thr_round(predicted_probability, threshold,index=index)
+def compute_measure(true_label,predicted_probability,threshold=.5):
+    predicted_label=thr_round(predicted_probability, threshold)
     t_id=(true_label==predicted_label) # truely predicted
     f_id=np.logical_not(t_id) # falsely predicted
 
@@ -361,7 +340,9 @@ def compute_measure(true_label,predicted_probability,threshold=.5,index=1):
     with np.errstate(divide='ignore'):
         f0=tn/(tn+.5*(fn+fp))
 
-    diagnInd= np.log2(1+acc) + np.log2(1+(sen+spec)/2)
+    auc=auc_score(true_label,predicted_probability)
+    #diagnInd= np.log2(1+acc) + np.log2(1+(sen+spec)/2)
+    diagnostic= sen**2*spec**2*auc**2
     ans=[]
     
     #"f1","f0","acc1","acc0","acc","auc"
@@ -370,10 +351,10 @@ def compute_measure(true_label,predicted_probability,threshold=.5,index=1):
     ans.append(sen)
     ans.append(spec)
     ans.append(acc)
-    ans.append(auc_score(true_label,predicted_probability))
+    ans.append(auc)
     ans.append(ppr)
     ans.append(npr)
-    ans.append(diagnInd)
+    ans.append(diagnostic)
     
     
     

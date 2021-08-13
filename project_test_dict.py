@@ -14,53 +14,72 @@ Created on Tue Apr 28 08:48:01 2020
 @author: dylansmith
 """
 
+try:del TAR #clear
+except:pass
+try:del LAG #clear
+except:pass
+
 from project_functions import *
+np=np; pd=pd; rl=rl; scipy=scipy; os=os; plt=plt
 
 sources=['../cleaned_data_3_1.csv',
          '../cleaned_data_3_1_extrapolate.csv',
          '../data_3_1_.csv',
          '../impute_data_avg.csv',
-         '../cleaned_data_old.csv']
+         '../cleaned_data_old.csv',
+         '../cleaned_data_3_1_ex_lstm.csv',
+         '../Record_start_end_derived.csv']
 
 outputs=['saved_results','output','feat_importance']
 
 arg=sys.argv
-i=1; sd_,pr_,pc_,no_,lm_,md_=-1,-1,-1,-1,-1,-1
+i=1; sd_,pr_,pc_,no_,lm_,md_,tl_=-1,-1,-1,-1,-1,-1,-1
 while i<len(arg):
-    if i==1: sd_=arg[1].lower() #y/n to small dataset
-    if i==2: pr_=arg[2].lower() #0: Average DataSet, 1:Time-Series DataSet
+    if i==1: sd_=arg[1].lower() #dataset with decimal being target length
+    if i==2: pr_=arg[2].lower() #0: Average Model, 1:Time-Series Model, 1.X:TS with X lags, 2.X: TS w/ X lags, reproduced data
     if i==3: pc_=arg[3].lower() #y/n to PCA
     if i==4: no_=arg[4].lower() #normalization: mm:0, ss:1
     if i==5: lm_=arg[5].lower() #pca: 0:thr .95//1:n_feat=bag size//dec:n_feat=% bag size//int:n_feat=int
     if i==6: md_=arg[6].lower() #0 for all, -1 for ensemble, or input for only run selected model
     i+=1
 
-models=['dt','lg','svc','rf','gnb','bnb','knn','nn','et','gb']
+models=['dt','lg','svc','rf','bnb','nn','et']
+#models=['dt','lg','svc','rf','gnb','bnb','knn','nn','et','gb']
+target_lengths=[12,9,6,3]
 
-write=0
+write=1
 
 #.74, .46, .29
 
 if True:#write==1:
 
-    Sum=10 #Sum=7
+    Sum=7 #Sum=7
     K=Sum
     if Sum==0: K=1
-    c=0
-    for i in [0]: #pca
-        for m in [0,1]: #average/time-series
-            for j in [1]: #scaler
-                for k in range(K):
-                    for l in [10]:
-                        c+=1
-                        temp=models[k]; tem="nohup python3"; te=">log"+str(c)+".txt &"
-                        if Sum==0: temp=-1; tem="!python"; te=""
-                        print(tem+" project_test_dict.py",2,m,i,j,l,temp,te)
+    c=0; C=1
+    for lag in [0,1,2,3,4,5]:
+        for tl in [0,1,2,3]:
+            for k in range(K):
+                if (c)%28==0:print(f"node {C}");C+=1
+                if (c)%98==0:print()
+                c+=1
+                temp=models[k]; tem="python3.6"; te=">log"+str(c)+".txt &"
+                if c>=85 and c<=112:tem="nohup python"
+                print(tem+" project_test_dict.py",2+tl/10,2+lag/10,0,1,0,temp,te)
+                #2 + t/10 --> 2 with 0/1/2/3 index for target length
+                #2 + x/10 --> reproduced data with 0/1/2/3 lags
+                #0 to PCA
+                #1 for ss
+                #0 -- irrelevant
+                #0 for all
 
 #for i in {1..35}; do rm "log$i.txt"; done
 
 #https://linuxhint.com/nohup_command_linux/
 
+sd_=float(sd_)
+tl_=int(round((sd_-sd_//1)*10)); sd_=sd_//1
+if sd_==-1:tl_=-1
 df = pd.read_csv(sources[0],low_memory = False).drop(['new random ID.1'],axis=1)
 df2= pd.read_csv(sources[1],low_memory = False).drop(['new random ID.1'],axis=1)
 df0= pd.read_csv(sources[2])
@@ -76,14 +95,20 @@ elif sd_==2:
 elif sd_==3:
     df=pd.read_csv(sources[4],low_memory = False);df.index=df['new random ID']
 
+LI=[45747, 91937] #removed rIDs from 1998 dataset --> 1996
+
 #Average/TimeSeries
 
 if pr_=='1' or pr_=='y': pr_=1
 elif pr_=='0' or pr_=='n': pr_=0
 elif pr_==-1:
-    prg=input("0/n:Average Model, 1/y:Time Series: 0/1: ").lower()
+    prg=input("0/n:Average Model, 1/y:Time Series; with 1.X:TS with X lags, 2.X: TS w/ X lags, reproduced data: ").lower()
     if prg=='y' or prg=='1': pr_=1
+    elif "." in prg:
+        pr_=float(prg)
     else: pr_=0
+elif pr_[0]=="1" or pr_[0]=="2": pr_=float(pr_)
+
 if sd_==3:df=df.drop(columns=['new random ID']);pr_==0
 elif pr_==0:
     DF=pd.read_csv(sources[3],low_memory = False);DF.index=DF['new random ID']
@@ -112,13 +137,78 @@ encounter=['Arterial Thrombosis','Hemolytic Anemia','Vasculitis','Pleurisy','Per
 
 medication=['Hydroxychloroquine','Azathioprine','Belimumab','Cyclosphamide','Methotrexate','Mycophenolate','Oral corticosteroids','Other SLE immunsuppressant','Rituximab']
 
-if pr_==1:
+if pr_>=1:
     ##Create Change Columns
+    LAG=5
+    if type(pr_)==float:
+        LAG=int(round(10*(pr_-pr_//1)))
+        pr_=pr_//1
+        shave_df=shave_df
+        
+        #Restructure data to reproduce entries if we have 925 data
+        #pull source[5] which is re-labelled data
+        period_plus=period_plus; d_ext=d_ext; age_comp=age_comp
+        DF=pd.read_csv(sources[5])
+        DF.index=DF['new random ID']; ind=DF['new random ID']; DF=DF.drop(['new random ID','0.Age'],axis=1)
+        #df=pd.concat([df,DF[DF.columns[-28:]]],axis=1).drop()
+        
+        if tl_==-1: tl_=input("Choose index from [12,9,6,3] for length of target space: ")
+        tl_=int(tl_)
+        TAR=target_lengths[tl_]
+        
+        ######AGE
+        temp=pd.DataFrame(index=DF.index)
+        Record=pd.read_csv(sources[-1])
+        Record.index=Record['new random ID'];Record=Record[Record.index.isin(DF.index)]
+        record=period_plus(Record['Date Text_2'].apply(lambda x: x.split("/")),-6)
+        #record is date used to compute 0.Age (X -6_periods)
+        temp["0"]=period_plus(DF['DOB'].apply(lambda x: x.split("/")).apply(lambda x:[x[0],x[1],d_ext(x[2])]),0)
+        temp["1"]=period_plus(DF['DOB'].apply(lambda x: x.split("/")).apply(lambda x:[x[0],x[1],d_ext(x[2])]),-1)
+        temp["r"]=record
+        temp["0"]=(temp['0']+temp['r']).apply(lambda x: (x[:3],x[3:])).apply(lambda x:age_comp(x[0],x[1]))
+        temp["1"]=(temp['1']+temp['r']).apply(lambda x: (x[:3],x[3:])).apply(lambda x:age_comp(x[0],x[1]))-temp['0']
+        temp["1"]=temp["1"].apply(lambda x:max(.5,x))
+        
+        ######LABELS
+        Labels=DF.iloc[:,-28:]; DF=DF.iloc[:,:-28]; DF=DF.drop(['DOB'],axis=1)
+        
+        per_start=0
+        if pr_==1 or df.shape[0]!=925:
+            #only shaved dataset (no restructuring)
+            pr_=1
+            per_start=5-LAG
+            DF=df.rename(columns={'0.Age':'Age'})
+        #for each period:
+        for per in range(per_start,6-LAG): #starting period
+            #per=0,1,2,3...
+            time=per+1
+            if pr_!=1:DF["Age"]=(temp['0']+temp['1'].apply(lambda x: x+(per-1)*.5)).apply(lambda x: int(x//1))
+            new=DF.copy()
+            if pr_!=1:new.index=ind.apply(lambda x: x+per/10) #create new float index
+            remove=["1.","2.","3.","4.","5.","6."]
+            for i in range(LAG+1):
+                remove.remove(str(time+i)+".")
+            new=shave_df(new,remove)
+            cols=[]
+            for c in new.columns:
+                try: C=str(int(c[0])-per)+c[1:]
+                except: C=c
+                cols.append(C)
+            new.columns=cols
+            
+            ## now add Label
+            new['Label']=list(Labels[str(TAR)+"--Label_"+str(time)])
+            
+            if per==per_start: Extended=new
+            else: Extended=pd.concat([Extended,new],axis=0)
+        df=Extended
+        
+    
     I=[]
     for i in rl(df.columns):
         if df.columns[i][0]=='1':I.append(df.columns[i][1:])
     
-    for i in range(5):
+    for i in range(LAG):
         for j in rl(I):
             name=str(i+1.5)+I[j]
             df[name]=df[str(i+2)+I[j]]-df[str(i+1)+I[j]]
@@ -129,23 +219,23 @@ if pr_==1:
 
     ##Drop Features
     
-    for i in rl(I):I[i]=I[i][1:]
+    #for i in rl(I):I[i]=I[i][1:]
     
-    drop=medication
-    cols=list(df.columns)
-    for i in rl(cols):
-        dfc=df.columns[i]
-        if dfc.split('.')[-1] in drop:
-            cols.remove(dfc)
-    df2=df[cols]
-    
-    drop=medication+encounter
-    cols=list(df.columns)
-    for i in rl(cols):
-        dfc=df.columns[i]
-        if dfc.split('.')[-1] in drop:
-            cols.remove(dfc)
-    df3=df[cols]
+    #drop=medication
+    #cols=list(df.columns)
+    #for i in rl(cols):
+    #    dfc=df.columns[i]
+    #    if dfc.split('.')[-1] in drop:
+    #        cols.remove(dfc)
+    #df2=df[cols]
+    #
+    #drop=medication+encounter
+    #cols=list(df.columns)
+    #for i in rl(cols):
+    #    dfc=df.columns[i]
+    #    if dfc.split('.')[-1] in drop:
+    #        cols.remove(dfc)
+    #df3=df[cols]
 
 
 feat_labels = list(df.columns)[:-1]
@@ -197,7 +287,8 @@ Threshold=[.3,.35,.4,.45,.5,.55,.6]
 
 ##Models and Statistics Used
 
-Model_Names=['dt','lg','svc','rf','gnb','bnb','knn','nn','et','gb']
+Model_Names=['dt','lg','svc','rf','bnb','nn','et']
+#Model_Names=['dt','lg','svc','rf','gnb','bnb','knn','nn','et','gb']
 stats=['f1', 'f0', 'acc1', 'acc0', 'acc', 'auc', 'ppr', 'npr', 'diagI']
 stat_num=len(stats)
 
@@ -294,8 +385,10 @@ Par_Performance,Performance,Tr_Performance,Vd_Performance,Model_Lists,Parameters
 #################################################################################################################
 #################################################################################################################
 
+try: 
+    print(TAR);print(LAG);mark="tar..lag."+str(TAR)+".."+str(LAG)+"_"
+except: mark=""
 
-          
 THRESHOLD=Threshold
 
 ####################
@@ -306,6 +399,8 @@ Model_List,Prediction_List,Majority_Param,Top_Param={},{},{},{}
 for thresh in Threshold: 
     if thresh==Threshold[0]:Perform,Tr_Perform,Vd_Perform=dict(zip(Threshold,[0,]*len(Threshold))),dict(zip(Threshold,[0,]*len(Threshold))),dict(zip(Threshold,[0,]*len(Threshold)))
     Perform[thresh],Tr_Perform[thresh],Vd_Perform[thresh]={},{},{}
+
+skfolds = StratifiedKFold(n_splits=fold_number, shuffle=True, random_state=42)
 
 for w in rl(Model_Names):
     
@@ -386,11 +481,14 @@ inp=inp+"_"
 str_1=pc+sni+xs+inp #predictions
 str_2=pc+sni+inp+xs #stats
 
-if md_!=0 and md_!=-1:
-    str_2_=pc+sni+inp+xs+Model_Names[0]
-    p=len(Prediction); output={}
-    for i in rl(Prediction): output[str(i)]=Prediction[i]
-    scipy.io.savemat("saved_results/"+str_1+Model_Names[0]+".mat", mdict=output, oned_as='row')
+if md_!=-1:
+    for m in rl(Model_Names):
+        MNAME=Model_Names[m]
+        str_2_=pc+sni+inp+xs+MNAME
+        Prediction=Prediction_List[MNAME]
+        p=len(Prediction); output={}
+        for i in rl(Prediction): output[str(i)]=Prediction[i]
+        scipy.io.savemat("saved_results/"+mark+str_1+Model_Names[m]+".mat", mdict=output, oned_as='row')
 
 
 for i in range(len(Threshold)):
@@ -423,8 +521,51 @@ def roc(y,pred):
     mt,mf,mh=roc_curve(y,pred.T[1])
     return mt,mf #AUC(mt,mf) #np.concatente([A,B])
 
+def convert(prediction_dict):
+    #input is Prediction Dictionary with inner lists
+    #output is Prediction Dictionary with inner dictionaries
+    new_dict={}
+    keys=list(prediction_dict.keys())
+    for k in keys:
+        prediction=prediction_dict[k]
+        new_dict[k]={}
+        if type(prediction)==list:
+            for i in range(len(prediction)):
+                new_dict[k][str(i)]=prediction[i]
+        else:
+            new_dict[k]=prediction
+    return new_dict
+
+def strip(i=301,folds=10):
+    #load text file nlog.txt
+    with open("log"+str(i)+'.txt', 'r') as file:
+        n = file.read().replace('\n', '')
+    train_indices=[];test_indices=[]
+    for f in range(folds):
+        start=n.find("FOLD NUMBER:0".replace("0",str(f))) #TRAIN
+        start=n.find("TRAIN",start)+5
+        end=n.find("TEST",start)-2
+        train_index=list(np.array(n[start:end].split(", "),dtype=int))
+        start=end+6
+        if f<folds-1:end=n.find("FOLD NUMBER",start)-2
+        else:end=len(n)-2
+        test_index=list(np.array(n[start:end].split(", "),dtype=int))
+        train_indices.append(train_index);test_indices.append(test_index)
+    return train_indices,test_indices
+
+
 ROC={}
 
+'''
+for l in L0:
+    print(l)
+    for i in range(10):
+        t0=(Prediction_List[l][str(i)][-1])
+        for j in rl(t0):
+            if np.max(t0[j])==0:break
+        print(j,end=", ")
+        print(Prediction_List[l][str(i)].shape[1])
+        '''
 print()
 print()
 if md_==0 or md_==-1:
@@ -439,7 +580,7 @@ if md_==0 or md_==-1:
             contents=os.listdir(route);L02=[]
             for i in rl(L0):
                 name=L0[i]
-                st_1,st_2=str_1+name+".mat",str_2+name+".csv"
+                st_1,st_2=mark+str_1+name+".mat",mark+str_2+name+".csv"
                 if (st_2 not in contents) or (st_2 not in contents): print("missing file:",name);continue
                 else:L02.append(name)
                 temp0=scipy.io.loadmat(route+st_1) #predictions
@@ -455,10 +596,27 @@ if md_==0 or md_==-1:
                 Vd_Performance[-1][name]=np.array(temp[2*stat_num:3*stat_num])
                 Parameters[-1][name]=temp[-1]
             L0=L02
+        else:
+            L0=list(Prediction_List.keys())
+            Model_Names=list(Prediction_List.keys())
+            Prediction_List=convert(Prediction_List)
         THRESHOLD=Threshold[I]
         stat_ind=stats.index(Scaling)
         Perform=Performance[I]
         MNAME='ens'
+        for l in L0:
+            print(l)
+            for i in range(10):
+                t0=(Prediction_List[l][str(i)][0])
+                t1=(Prediction_List[l][str(i)][-1])
+                for end_bag in rl(t0):
+                    if np.max(t0[end_bag])==0:break
+                    if end_bag==len(t0)-1:end_bag+=1
+                for end_test in rl(t1):
+                    if np.max(t1[end_test])==0:break
+                    if end_test==len(t1)-1:end_test+=1
+                print(end_bag,end=", ")
+                print(end_test)
         
         if md_==-1: Bag_List=[]
         
@@ -473,6 +631,24 @@ if md_==0 or md_==-1:
         Testing_Rec,Training_Rec,Validation_Rec=0,0,0
         for name in L0: scale=L1[L0.index(name)];Validation_Rec+=Vd_Performance[I][name]*scale/total_scale
         fold_index=-1
+
+        '''train_indices,test_indices=[],[]
+        if input('load indices? Yes--1; No--0 : ')==1:
+            #see Desktop: conversion.py
+            t=300
+
+            conv={}
+            
+            for Lag in [0,1,2,3,4,5]:
+                for Tar in [12,9,6,3]:
+                    t+=1
+                    conv[(Tar,Lag)]=t
+            train_indices,test_indices=strip(conv[(TAR,LAG)])
+        else:
+            for train_index, test_index in skfolds.split(X,y): #reverse order
+                train_indices,test_indices=[train_index]+train_indices, [test_index]+test_indices
+        
+        for train_index, test_index in zip(train_indices,test_indices):'''
         for train_index, test_index in skfolds.split(X,y):
             train_X, test_X = X[train_index], X[test_index]
             train_y, test_y = y[train_index], y[test_index]
@@ -481,8 +657,10 @@ if md_==0 or md_==-1:
             print('>Train: 0=%d, 1=%d, Test: 0=%d, 1=%d' % (train_0, train_1, test_0, test_1))
         
             fold_index+=1
+            #if fold_index>0:break
             
             TRAINING = df.iloc[train_index]
+            print(sum(TRAINING.iloc[:,-1])*2)
             
             if md_==-1:bag_list = get_bags(TRAINING,bag_number); Bag_List.append(bag_list)
             else:bag_list= Bag_List[fold_index]
@@ -491,12 +669,15 @@ if md_==0 or md_==-1:
             
             predict_list={};pred_list={};j=-1
             for p in rl(L0):
-                name=L0[p]; temp=Prediction_List[name][str(fold_index)]; t0=temp[0]
-                if j==-1:
-                    for j in rl(t0):
-                        if np.max(t0[j])==0:break
+                name=L0[p]; temp=Prediction_List[name][str(fold_index)]; t0=temp[0];t1=temp[-1]
+                for end_bag in rl(t0):
+                    if np.max(t0[end_bag])==0:break
+                    if end_bag==len(t0)-1:end_bag+=1
+                for end_test in rl(t1):
+                    if np.max(t1[end_test])==0:break
+                    if end_test==len(t1)-1:end_test+=1
                 #if j!=80: print("broken:",name,fold_index)
-                predict_list[name]=temp[:bag_number,:j,:]; pred_list[name]=temp[-1,:,:]
+                predict_list[name]=temp[:bag_number,:end_bag,:]; pred_list[name]=temp[-1,:end_test,:]
                 
             for i in range(bag_number):
                 pred_tr=0
@@ -531,6 +712,8 @@ if md_==0 or md_==-1:
 
 ## Exporting Performance ################
 
+
+
 for I in range(3):
     Level=[Performance,Tr_Performance,Vd_Performance][I]
     level=['','tr_','vd_'][I]
@@ -559,6 +742,9 @@ for I in range(3):
 ############################
 import matplotlib as mpl
 
+def sf(x,s=0,dig=3):
+    return str(x)[s:dig+2]
+
 def roc2(y,pred,n=2000):
     #n is number of sampled thresholds-1; 1/n is grain of search
     A=[];thr=[];B=[]
@@ -572,27 +758,166 @@ def roc2(y,pred,n=2000):
     B.sort(key=(lambda x:x[2]))
     return np.array(B)
 
+def condense(pred,Y,sections=20,target=1,classes={0:1,1:1},post=1):
+    ##Calibrated Risk Data Point Creation (section avg prob cert. vs avg output)
+    ##post is 1 for weighting(post-splitting) and 0 for resampling(pre-splitting)
+    if post==False:
+        pred0=[]; Y0=[]
+        for i in range(len(Y)):
+            for j in range(classes[1-Y[i]]):
+                pred0.append(pred[i]); Y0.append(Y[i])
+        pred=np.array(pred0); Y=np.array(Y0)
+    size=len(Y); step=round(size/sections)
+    N=np.zeros([size,2]); N[:,:1]=pred[:,target:target+1]; N[:,1:2]=np.reshape(Y,(size,1))
+    data=pd.DataFrame(N)
+    data=np.array(data.sort_values(0))
+    Output=np.zeros([sections,2])
+    for i in range(sections):
+        if i==sections-1:end=size
+        else:end=(i+1)*step
+        part=data[i*step:end,:]
+        if post==True:
+            wt=0
+            for j in rl(part):
+                w=classes[1-part[j][1]]; wt+=w
+                part[j]=part[j]*w
+            ##find weighted average based on total data class distribution
+            Output[i]=np.sum(part,0)/wt #data point
+        else: 
+            Output[i]=np.average(part,0)
+    return Output
+
+from scipy.stats import norm as s_norm
+from scipy.stats import chisquare
+from sklearn import linear_model as LM
+
+
+
+def conInt(n1,n2,auc,alph=.05):
+    #returns c=interval distance ie, c: AUC+-c is conInt
+    #n1 is num. positive instances
+    #n2 is num. negative instances
+    q,r,s=auc*(1-auc),auc/(2-auc)-auc**2,2*auc**2/(1+auc)-auc**2
+    se=((q+(n1-1)*r+(n2-1)*s)/(n1*n2))**.5
+    zcrit=s_norm.ppf(1-alph/2)
+    c=se*zcrit
+    return c
+
+def linestyle(lengths,copies=1,spaces=1,offset=0):
+    num=len(lengths)
+    if type(copies)==int:c=copies; copies=[c,]*num
+    if type(spaces)==int:s=spaces; spaces=[s,]*num
+    form=[]
+    for i in range(len(lengths)):
+        form+=[lengths[i],spaces[i]]*copies[i]
+    form=(offset,tuple(form))
+    return form
+        
+
+color_toggle=0
 
 if md_==0 or md_==-1:
+    #######ROC CURVES
+    #find distribution for CI
+    co=df['Label'].value_counts()
+    n1,n2=co[1],co[0]
+    ################
     style="default" #seaborn
     mpl.style.use(style); color="white"
     plt.figure(figsize=(10,8)); P=Performance[0]; ticks=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
     
-    for mod,name in zip(['dt','lg', 'rf', 'bnb', 'nn', 'ens'],['Decision Tree','Logistic Regression', 'Random Forest', 'Bernoulli N.B.', 'Neural Network', 'Ensemble Method']):
+    styles=['-','-','-','-','-','--',':']
+    colors=['blue','orange','green','crimson','purple','black','red']
+    
+    if color_toggle==0:
+        grey=.7
+        colors=[]; styles=[]
+        for i in [.1,.65,.25,.55,.4,.0,.7]:
+            colors.append((i,i,i))
+        for i in range(5):
+            c=[(i+1)//2,1]
+            styles.append(linestyle([i+1,1],copies=c))
+        styles+=['--',':']
+        
+    i=0
+    for mod,name in zip(['dt','lg', 'rf', 'bnb', 'nn', 'ens'],['Decision Tree:       ','Logistic Regression: ', 'Random Forest:       ', 'Naïve Bayes:         ', 'Neural Network:      ', 'Ensemble Method:     ']):
         R=roc2(ROC['Y'],ROC[mod]['pred'])[:,:2].T
-        if mod!='ens':plt.plot(R[0],R[1],label=name+': '+' (AUC={})'.format(str(P[mod][5])[:5]),alpha=.8,lw=1.5)
-        else:plt.plot(R[0],R[1],label=name+': '+' (AUC={})'.format(str(P[mod][5])[:5]),alpha=.8,lw=1.5,color='black',linestyle='--')
+        a=P[mod][5]; c=conInt(n1,n2,a,.05) #find 95% confidence interval
+        inS=0 #1 to remove 0 from decimals
+        if mod!='ens':plt.plot(R[0],R[1],label=name+'AUC={} (95% CI: {}-{})'.format(sf(a,inS),sf(a-c,inS),sf(a+c,inS)),alpha=.8,lw=1.5,color=colors[i],linestyle=styles[i])
+        else:plt.plot(R[0],R[1],label=name+'AUC={} (95% CI: {}-{})'.format(sf(a,inS),sf(a-c,inS),sf(a+c,inS)),alpha=.8,lw=1.5,color=colors[i],linestyle=styles[i])
+        i+=1
     if X.shape[1]==588:title="Progressive"
     else:title="Average"
-    plt.title('Receiver Operating Characteristic Curves for dataset : {}, {}'.format(X.shape[0],title),fontsize=13)
-    plt.ylabel('True positive rate',fontsize=11); plt.xlabel('False positive rate',fontsize=11)
+    #plt.title('Receiver Operating Characteristic Curves for dataset : {}, {}'.format(X.shape[0],title),fontsize=13)
+    plt.ylabel('True Positive Rate',fontsize=11); plt.xlabel('False Positive Rate',fontsize=11)
     plt.xticks(ticks);plt.yticks(ticks)
-    plt.plot([0, 1],[0, 1],linestyle=':', lw=1, color='r', alpha=.8)
+    plt.plot([0, 1],linestyle=styles[-1], lw=1, color=colors[-1], alpha=.8)
     #if style=="default":color="lightgrey"
     plt.grid(color=color)
-    plt.legend(fontsize=11,loc="lower right")
-    plt.draw();plt.savefig("ROC curves/"+str(X.shape[0])+"."+title+".png");plt.close()
-
+    L=plt.legend(fontsize=10,loc="lower right")
+    plt.setp(L.texts, family='monospace')
+    plt.xlim([0,1]); plt.ylim([0,1])
+    plt.draw();plt.savefig("ROC curves/"+mark+str(min(X.shape[0],1996))+"."+title+".png")#".tiff",dpi=1200)
+    plt.close()
+    
+    #groups=int(input('number of sections for calibrated risk: '))
+    for I in range(2):
+        mpl.style.use(style)
+        if I==0:plt.figure(figsize=(20,16))
+        #######CALIBRATED RISK
+        groups=10; i=1
+    
+        for mod,name,color in zip(['dt','rf','ens','lg'],['Decision Tree_       ', 'Random Forest_       ','Logistic Regression_ ',  'Ensemble Method_     '],['red','blue','green','black']):
+            if I==0:plt.subplot(2,2,i); i+=1
+            if I==1:plt.figure(figsize=(10,8))
+            plt.plot([0, 1],linestyle='-.', lw=1, color='r', alpha=.8) #45 degree line
+            classes=dict(df['Label'].value_counts())
+            R=condense(ROC[mod]['pred'],ROC['Y'],groups,classes=classes,post=1) #sort and average pred/observed prob for c1 within X groups
+            #R outputs pred/obs with X data points
+            #given p.p.o., compare o.p.o. with prediction from best fit line
+            regr=LM.LinearRegression(); regr.fit(R[:,0:1],R[:,1]); regr_pred=regr.predict(R[:,0:1])
+            a=regr.coef_[0]; b=regr.predict([[0]])[0]
+            C2,P=chisquare(R[:,1],regr_pred)
+            A,B,C,D=sf(a,inS),sf(b,inS),sf(C2,inS),sf(P,inS)
+            ls='-'; inS=0 #1 to remove 0 from decimals
+            #actual curve
+            plt.plot(R[:,0],R[:,1],alpha=.5,lw=1.5,color=color,linestyle=':')
+            #best fit line
+            plt.plot([b,b+a],label=name+'equation: {}x + {} (χ2={}, P={})'.format(A,B,C,D),alpha=.8,lw=1.5,color=color,linestyle=ls)
+            if X.shape[1]==588:title="Progressive"
+            else:title="Average"
+            plt.ylabel('Observed Probability of Outcome',fontsize=11); plt.xlabel('Predicted Probability of Outcome',fontsize=11)
+            plt.xticks(ticks);plt.yticks(ticks); color='white'
+            #if style=="default":color="lightgrey"
+            plt.grid(color=color)
+            L=plt.legend(fontsize=10,loc="upper left")
+            plt.setp(L.texts, family='monospace')
+            plt.xlim([0,1]); plt.ylim([0,1])
+            if I==1:plt.draw();plt.savefig("Calibrated Risk Curves/"+mark+name+str(X.shape[0])+"."+title+".png");plt.close()
+        if I==0:plt.draw();plt.savefig("Calibrated Risk Curves/"+mark+str(X.shape[0])+"."+title+".png");plt.close()
+#    100 patients
+#    predictions
+#    prob for each
+#    ranked
+#    cut into 10 decitile/20 dodecitile
+#    each quantile average certainty
+#    average membership
+#    compare
+#    regress
+#    
+#    Make 1 per {RF, DT}; {Average, Progressive} with .45/.50/.55
+#    color for each threshold
+#    data points/lines in that color
+#    equation of the line
+#    
+#    Hosmer-Lemeshow statistic for each (CHI^2 and P value)
+#    Ideal 45 degrees
+    
+    
+    
+    
+    
 #dna=".5.dsDNA Ab,binary"
 #ccols=['1.5.dsDNA Ab,binary','2.5.dsDNA Ab,binary','3.5.dsDNA Ab,binary','4.5.dsDNA Ab,binary','5.5.dsDNA Ab,binary','1.dsDNA Ab,binary','2.dsDNA Ab,binary','3.dsDNA Ab,binary','4.dsDNA Ab,binary','5.dsDNA Ab,binary','6.dsDNA Ab,binary','Label']
 #df[ccols].iloc[:5,5:]
@@ -623,15 +948,21 @@ NN=str(num_instances)+"."+str(X.shape[1])+"."
 lines=os.listdir(prefix)
 count=0
 for l in lines:
-    if ((today[:-4] in l) and (".csv" in l)) and (('compl_'+NN+pca_+bags+"_"+today) in l):count+=1
+    if ((today[:-4] in l) and (".csv" in l)) and ((mark+NN+pca_+bags+"_"+today) in l):count+=1
 if count>0:today=today[:-4]+'__'+str(count)+".csv"
 
 #####
 
 if md_=="" or md_=="ens":
-    exp=pd1.to_csv(prefix+NN+pca_+bags+"_"+today)
+    exp=pd1.to_csv(prefix+mark+NN+pca_+bags+"_"+today)
+    if md_=="":
+        for MNAME in Model_Names:
+            test=Threshold.copy()
+            for i in rl(test):test[i]=str(test[i])[1:4]+"0"*int((test[i]*10+.5)%1*2)+"_"+MNAME
+            filt_pd1=pd1[pd1.index.isin(test)]
+            exp=filt_pd1.to_csv("saved_results/"+mark+str_2+MNAME+".csv")
 else:
-    exp=pd1.to_csv("saved_results/"+str_2_+".csv")
+    exp=pd1.to_csv("saved_results/"+mark+str_2_+".csv")
 
 #export data
 
@@ -642,45 +973,6 @@ else:
 
 #[dsmith167@erdos ~]$ "nohup python file.py > log1.txt %"
 
-
-'''
-#########################################################
-##FEATURE IMPORTANCE
-
-models=list(Model_List.keys())
-target="feat_importance/"
-
-for M in ['lg','svc','bnb']:
-    model=M
-    if model in models:
-        md=unravel(Model_List[model])
-    
-        feature_importances = pd.DataFrame(columns = ['feature', 'importance'])
-        for i in range(len(md)):
-            feature_importance=pd.DataFrame(np.hstack((np.array([feat_labels]).T, md[i].coef_.T)), columns=['feature', 'importance'])
-            feature_importances = feature_importances.append(feature_importance)
-        
-        
-        feature_importances['importance']=pd.to_numeric(feature_importances['importance'])
-        feature_importances = feature_importances.groupby('feature').sum()
-        exp=feature_importances.sort_values(by='importance', ascending=False).to_csv(target+model+'_feat_'+str_2+'.csv')  
-
-for M in ['dt','rf']:#,'et','gb']:
-    model=M
-    if model in models:
-        md=unravel(Model_List[model])
-        
-        a = []
-        for i in range(len(md)):
-            for feature in zip(feat_labels, md[i].feature_importances_):
-                a.append(feature)
-        my_set = {x[0] for x in a}
-        my_sums = [(i,sum(x[1] for x in a if x[0] == i)/20) for i in my_set]
-        my_sums.sort(key = lambda x: x[1],reverse = True)
-        feature_importances=pd.DataFrame(my_sums,columns=["feature","importance"])
-        exp=feature_importances.to_csv(target+model+'_feat_'+str_2+'.csv',index=False)
-'''
-'''
 def replace_in(x,Y=["HGB","HCT"]):
     x=list(x)
     for xi in rl(x):
@@ -690,26 +982,63 @@ def replace_in(x,Y=["HGB","HCT"]):
             except: pass
     return pd.Series(x)
 
-source='feat_importance/'
-contents=os.listdir(source[:-1])
-partial="_feat_"+'0_925_ss_588_.csv'
-files={};F=0
-s_group={};S=0
-a_group={};A=0
-
-for M in ['dt','rf','lg']:
-    file=M+partial
-    if file in contents:
-        load=pd.read_csv(source+file).apply(lambda x: replace_in(x))
-        load['importance']=np.abs(load['importance'])
-        files[M]=load.sort_values("importance",ascending=False)
-        load['feature']=load['feature'].apply(lambda x: ".".join(x.split(".")[1:]))
-        s_group[M]=load.groupby('feature').sum().sort_values("importance",ascending=False)
-        a_group[M]=load.groupby('feature').mean().sort_values("importance",ascending=False)
-
-for M in s_group.keys():
-    try: S=pd.concat([S,pd.DataFrame(list(s_group[M].index),columns=[M+" rank"])],axis=1);A=pd.concat([A,pd.DataFrame(list(a_group[M].index),columns=[M+" rank"])],axis=1)
-    except: S=pd.DataFrame(list(s_group[M].index),columns=[M+" rank"]);A=pd.DataFrame(list(a_group[M].index),columns=[M+" rank"])
+#########################################################
+##FEATURE IMPORTANCE
+if md_==0 or md_==-1:
+    models=list(Model_List.keys())
+    target="feat_importance/"
+    
+    for M in ['lg','svc','bnb']:
+        model=M
+        if model in models:
+            md=unravel(Model_List[model])
         
-#exp=S.to_csv(source+'s_group'+partial)
-exp=A.to_csv(source+'a_group'+partial)'''
+            feature_importances = pd.DataFrame(columns = ['feature', 'importance'])
+            for i in range(len(md)):
+                feature_importance=pd.DataFrame(np.hstack((np.array([feat_labels]).T, md[i].coef_.T)), columns=['feature', 'importance'])
+                feature_importances = feature_importances.append(feature_importance)
+            
+            
+            feature_importances['importance']=pd.to_numeric(feature_importances['importance'])
+            feature_importances = feature_importances.groupby('feature').sum()
+            exp=feature_importances.sort_values(by='importance', ascending=False).to_csv(target+mark+model+'_feat_'+str_2+'.csv')  
+    
+    for M in ['dt','rf']:#,'et','gb']:
+        model=M
+        if model in models:
+            md=unravel(Model_List[model])
+            
+            a = []
+            for i in range(len(md)):
+                for feature in zip(feat_labels, md[i].feature_importances_):
+                    a.append(feature)
+            my_set = {x[0] for x in a}
+            my_sums = [(i,sum(x[1] for x in a if x[0] == i)/20) for i in my_set]
+            my_sums.sort(key = lambda x: x[1],reverse = True)
+            feature_importances=pd.DataFrame(my_sums,columns=["feature","importance"])
+            exp=feature_importances.to_csv(target+mark+model+'_feat_'+str_2+'.csv',index=False)
+    
+    
+    source='feat_importance/'
+    contents=os.listdir(source)
+    partial="_feat_"+'0_925_ss_588_.csv'
+    files={};F=0
+    s_group={};S=0
+    a_group={};A=0
+    
+    for M in ['dt','rf','lg']:
+        file=M+partial
+        if file in contents:
+            load=pd.read_csv(source+mark+file).apply(lambda x: replace_in(x))
+            load['importance']=np.abs(load['importance'])
+            files[M]=load.sort_values("importance",ascending=False)
+            load['feature']=load['feature'].apply(lambda x: ".".join(x.split(".")[1:]))
+            s_group[M]=load.groupby('feature').sum().sort_values("importance",ascending=False)
+            a_group[M]=load.groupby('feature').mean().sort_values("importance",ascending=False)
+    
+    for M in s_group.keys():
+        try: S=pd.concat([S,pd.DataFrame(list(s_group[M].index),columns=[M+" rank"])],axis=1);A=pd.concat([A,pd.DataFrame(list(a_group[M].index),columns=[M+" rank"])],axis=1)
+        except: S=pd.DataFrame(list(s_group[M].index),columns=[M+" rank"]);A=pd.DataFrame(list(a_group[M].index),columns=[M+" rank"])
+            
+    #exp=S.to_csv(source+'s_group'+partial)
+    exp=A.to_csv(source+mark+'a_group'+partial)
