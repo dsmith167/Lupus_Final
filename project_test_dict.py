@@ -197,7 +197,7 @@ if pr_>=1:
             new.columns=cols
             
             ## now add Label
-            new['Label']=list(Labels[str(TAR)+"--Label_"+str(time)])
+            new['Label']=list(Labels[str(TAR)+"--Label_"+str(time+LAG)])
             
             if per==per_start: Extended=new
             else: Extended=pd.concat([Extended,new],axis=0)
