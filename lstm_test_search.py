@@ -46,7 +46,7 @@ pd.set_option('display.width', 1000)
 pd.options.display.float_format = '{:.2f}'.format
 
 
-sources=['./cleaned_data_3_1_ex_lstm.csv','./Record_start_end_derived.csv']
+sources=['../cleaned_data_3_1_ex_lstm.csv','../Record_start_end_derived.csv']
 
 df= pd.read_csv(sources[0],low_memory = False)
 df.index=df['new random ID']; df=df.drop(['new random ID','0.Age'],axis=1)
@@ -567,4 +567,4 @@ for LEN in target_lengths: #,12:
     import datetime as dt
     prefix="output/"
     today=str(dt.datetime.today()).split(" ")[0][5:]+".csv"
-    exp=TT.to_csv("project_test/output/lstm_results_opt_"+s(flat_toggle,toggle,LEN,lags_,metric,today))
+    exp=TT.to_csv("../project_test/output/lstm_results_opt_"+s(flat_toggle,toggle,LEN,lags_,metric,today))
